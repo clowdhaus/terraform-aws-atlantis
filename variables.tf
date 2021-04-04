@@ -4,12 +4,6 @@ variable "name" {
   default     = "atlantis"
 }
 
-variable "internal" {
-  description = "Whether the load balancer is internal or external"
-  type        = bool
-  default     = false
-}
-
 variable "tags" {
   description = "A map of tags to use on all resources"
   type        = map(string)
@@ -47,38 +41,8 @@ variable "vpc_id" {
   default     = ""
 }
 
-variable "public_subnet_ids" {
-  description = "A list of IDs of existing public subnets inside the VPC"
-  type        = list(string)
-  default     = []
-}
-
 variable "private_subnet_ids" {
   description = "A list of IDs of existing private subnets inside the VPC"
-  type        = list(string)
-  default     = []
-}
-
-variable "cidr" {
-  description = "The CIDR block for the VPC which will be created if `vpc_id` is not specified"
-  type        = string
-  default     = ""
-}
-
-variable "azs" {
-  description = "A list of availability zones in the region"
-  type        = list(string)
-  default     = []
-}
-
-variable "public_subnets" {
-  description = "A list of public subnets inside the VPC"
-  type        = list(string)
-  default     = []
-}
-
-variable "private_subnets" {
-  description = "A list of private subnets inside the VPC"
   type        = list(string)
   default     = []
 }
@@ -88,36 +52,6 @@ variable "alb_ingress_cidr_blocks" {
   description = "List of IPv4 CIDR ranges to use on all ingress rules of the ALB."
   type        = list(string)
   default     = ["0.0.0.0/0"]
-}
-
-variable "alb_log_bucket_name" {
-  description = "S3 bucket (externally created) for storing load balancer access logs. Required if alb_logging_enabled is true."
-  type        = string
-  default     = ""
-}
-
-variable "alb_log_location_prefix" {
-  description = "S3 prefix within the log_bucket_name under which logs are stored."
-  type        = string
-  default     = ""
-}
-
-variable "alb_logging_enabled" {
-  description = "Controls if the ALB will log requests to S3."
-  type        = bool
-  default     = false
-}
-
-variable "alb_authenticate_oidc" {
-  description = "Map of Authenticate OIDC parameters to protect ALB (eg, using Auth0). See https://www.terraform.io/docs/providers/aws/r/lb_listener.html#authenticate-oidc-action"
-  type        = any
-  default     = {}
-}
-
-variable "alb_authenticate_cognito" {
-  description = "Map of AWS Cognito authentication parameters to protect ALB (eg, using SAML). See https://www.terraform.io/docs/providers/aws/r/lb_listener.html#authenticate-cognito-action"
-  type        = any
-  default     = {}
 }
 
 variable "allow_unauthenticated_access" {
@@ -148,44 +82,6 @@ variable "whitelist_unauthenticated_cidr_blocks" {
   description = "List of allowed CIDR blocks to bypass authentication"
   type        = list(string)
   default     = []
-}
-
-variable "alb_listener_ssl_policy_default" {
-  description = "The security policy if using HTTPS externally on the load balancer. [See](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/create-https-listener.html)."
-  type        = string
-  default     = "ELBSecurityPolicy-2016-08"
-}
-
-# ACM
-variable "certificate_arn" {
-  description = "ARN of certificate issued by AWS ACM. If empty, a new ACM certificate will be created and validated using Route53 DNS"
-  type        = string
-  default     = ""
-}
-
-variable "acm_certificate_domain_name" {
-  description = "Route53 domain name to use for ACM certificate. Route53 zone for this domain should be created in advance. Specify if it is different from value in `route53_zone_name`"
-  type        = string
-  default     = ""
-}
-
-# Route53
-variable "route53_zone_name" {
-  description = "Route53 zone name to create ACM certificate in and main A-record, without trailing dot"
-  type        = string
-  default     = ""
-}
-
-variable "route53_record_name" {
-  description = "Name of Route53 record to create ACM certificate in and main A-record. If null is specified, var.name is used instead. Provide empty string to point root domain name to ALB."
-  type        = string
-  default     = null
-}
-
-variable "create_route53_record" {
-  description = "Whether to create Route53 record for Atlantis"
-  type        = bool
-  default     = true
 }
 
 # Cloudwatch
@@ -564,12 +460,6 @@ variable "custom_environment_variables" {
     }
   ))
   default = []
-}
-
-variable "security_group_ids" {
-  description = "List of one or more security groups to be added to the load balancer"
-  type        = list(string)
-  default     = []
 }
 
 variable "propagate_tags" {

@@ -1,9 +1,4 @@
 locals {
-  # VPC - existing or new?
-  vpc_id             = var.vpc_id == "" ? module.vpc.vpc_id : var.vpc_id
-  private_subnet_ids = coalescelist(module.vpc.private_subnets, var.private_subnet_ids, [""])
-  public_subnet_ids  = coalescelist(module.vpc.public_subnets, var.public_subnet_ids, [""])
-
   # Atlantis
   atlantis_image = var.atlantis_image == "" ? "runatlantis/atlantis:${var.atlantis_version}" : var.atlantis_image
   atlantis_url = "https://${coalesce(
@@ -23,9 +18,6 @@ locals {
 
   # webhook
   secret_webhook_key = local.has_secrets || var.atlantis_github_webhook_secret != "" ? var.atlantis_gitlab_user_token != "" ? "ATLANTIS_GITLAB_WEBHOOK_SECRET" : var.atlantis_github_user_token != "" || var.atlantis_github_webhook_secret != "" ? "ATLANTIS_GH_WEBHOOK_SECRET" : "ATLANTIS_BITBUCKET_WEBHOOK_SECRET" : ""
-
-  # determine if the alb has authentication enabled, otherwise forward the traffic unauthenticated
-  alb_authenication_method = length(keys(var.alb_authenticate_oidc)) > 0 ? "authenticate-oidc" : length(keys(var.alb_authenticate_cognito)) > 0 ? "authenticate-cognito" : "forward"
 
   # Container definitions
   container_definitions = var.custom_container_definitions == "" ? var.atlantis_bitbucket_user_token != "" ? jsonencode(concat([module.container_definition_bitbucket.json_map_object], var.extra_container_definitions)) : jsonencode(concat([module.container_definition_github_gitlab.json_map_object], var.extra_container_definitions)) : var.custom_container_definitions
@@ -106,16 +98,10 @@ locals {
 
 data "aws_region" "current" {}
 
-data "aws_route53_zone" "this" {
-  count = var.create_route53_record ? 1 : 0
-
-  name         = var.route53_zone_name
-  private_zone = false
-}
-
 ###################
 # Secret for webhook
 ###################
+
 resource "random_id" "webhook" {
   count = var.atlantis_github_webhook_secret != "" ? 0 : 1
 
@@ -163,85 +149,8 @@ resource "aws_ssm_parameter" "atlantis_bitbucket_user_token" {
 }
 
 ###################
-# VPC
-###################
-module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "v2.64.0"
-
-  create_vpc = var.vpc_id == ""
-
-  name = var.name
-
-  cidr            = var.cidr
-  azs             = var.azs
-  private_subnets = var.private_subnets
-  public_subnets  = var.public_subnets
-
-  enable_nat_gateway = true
-  single_nat_gateway = true
-
-  tags = local.tags
-}
-
-###################
 # ALB
 ###################
-module "alb" {
-  source  = "terraform-aws-modules/alb/aws"
-  version = "v5.10.0"
-
-  name     = var.name
-  internal = var.internal
-
-  vpc_id          = local.vpc_id
-  subnets         = local.public_subnet_ids
-  security_groups = flatten([module.alb_https_sg.this_security_group_id, module.alb_http_sg.this_security_group_id, var.security_group_ids])
-
-  access_logs = {
-    enabled = var.alb_logging_enabled
-    bucket  = var.alb_log_bucket_name
-    prefix  = var.alb_log_location_prefix
-  }
-
-  listener_ssl_policy_default = var.alb_listener_ssl_policy_default
-  https_listeners = [
-    {
-      target_group_index   = 0
-      port                 = 443
-      protocol             = "HTTPS"
-      certificate_arn      = var.certificate_arn == "" ? module.acm.this_acm_certificate_arn : var.certificate_arn
-      action_type          = local.alb_authenication_method
-      authenticate_oidc    = var.alb_authenticate_oidc
-      authenticate_cognito = var.alb_authenticate_cognito
-    },
-  ]
-
-  http_tcp_listeners = [
-    {
-      port        = 80
-      protocol    = "HTTP"
-      action_type = "redirect"
-      redirect = {
-        port        = 443
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
-    },
-  ]
-
-  target_groups = [
-    {
-      name                 = var.name
-      backend_protocol     = "HTTP"
-      backend_port         = var.atlantis_port
-      target_type          = "ip"
-      deregistration_delay = 10
-    },
-  ]
-
-  tags = local.tags
-}
 
 # Forward action for certain CIDR blocks to bypass authentication (eg. GitHub webhooks)
 resource "aws_lb_listener_rule" "unauthenticated_access_for_cidr_blocks" {
@@ -265,12 +174,13 @@ resource "aws_lb_listener_rule" "unauthenticated_access_for_cidr_blocks" {
 ###################
 # Security groups
 ###################
+
 module "alb_https_sg" {
   source  = "terraform-aws-modules/security-group/aws//modules/https-443"
-  version = "v3.17.0"
+  version = "v3.18.0"
 
   name        = "${var.name}-alb-https"
-  vpc_id      = local.vpc_id
+  vpc_id      = var.vpc_id
   description = "Security group with HTTPS ports open for specific IPv4 CIDR block (or everybody), egress ports are all world open"
 
   ingress_cidr_blocks = sort(compact(concat(var.allow_github_webhooks ? var.github_webhooks_cidr_blocks : [], var.alb_ingress_cidr_blocks)))
@@ -280,10 +190,10 @@ module "alb_https_sg" {
 
 module "alb_http_sg" {
   source  = "terraform-aws-modules/security-group/aws//modules/http-80"
-  version = "v3.17.0"
+  version = "v3.18.0"
 
   name        = "${var.name}-alb-http"
-  vpc_id      = local.vpc_id
+  vpc_id      = var.vpc_id
   description = "Security group with HTTP ports open for specific IPv4 CIDR block (or everybody), egress ports are all world open"
 
   ingress_cidr_blocks = sort(compact(concat(var.allow_github_webhooks ? var.github_webhooks_cidr_blocks : [], var.alb_ingress_cidr_blocks)))
@@ -293,10 +203,10 @@ module "alb_http_sg" {
 
 module "atlantis_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "v3.17.0"
+  version = "v3.18.0"
 
   name        = var.name
-  vpc_id      = local.vpc_id
+  vpc_id      = var.vpc_id
   description = "Security group with open port for Atlantis (${var.atlantis_port}) from ALB, egress ports are all world open"
 
   ingress_with_source_security_group_id = [
@@ -315,41 +225,9 @@ module "atlantis_sg" {
 }
 
 ###################
-# ACM (SSL certificate)
-###################
-module "acm" {
-  source  = "terraform-aws-modules/acm/aws"
-  version = "v2.12.0"
-
-  create_certificate = var.certificate_arn == ""
-
-  domain_name = var.acm_certificate_domain_name == "" ? join(".", [var.name, var.route53_zone_name]) : var.acm_certificate_domain_name
-
-  zone_id = var.certificate_arn == "" ? element(concat(data.aws_route53_zone.this.*.id, [""]), 0) : ""
-
-  tags = local.tags
-}
-
-###################
-# Route53 record
-###################
-resource "aws_route53_record" "atlantis" {
-  count = var.create_route53_record ? 1 : 0
-
-  zone_id = data.aws_route53_zone.this[0].zone_id
-  name    = var.route53_record_name != null ? var.route53_record_name : var.name
-  type    = "A"
-
-  alias {
-    name                   = module.alb.this_lb_dns_name
-    zone_id                = module.alb.this_lb_zone_id
-    evaluate_target_health = true
-  }
-}
-
-###################
 # ECS
 ###################
+
 module "ecs" {
   source  = "terraform-aws-modules/ecs/aws"
   version = "v2.5.0"
@@ -448,7 +326,7 @@ resource "aws_iam_role_policy" "ecs_task_access_secrets" {
 
 module "container_definition_github_gitlab" {
   source  = "cloudposse/ecs-container-definition/aws"
-  version = "v0.45.2"
+  version = "v0.56.0"
 
   container_name  = var.name
   container_image = local.atlantis_image
@@ -505,7 +383,7 @@ module "container_definition_github_gitlab" {
 
 module "container_definition_bitbucket" {
   source  = "cloudposse/ecs-container-definition/aws"
-  version = "v0.45.2"
+  version = "v0.56.0"
 
   container_name  = var.name
   container_image = local.atlantis_image
@@ -593,7 +471,7 @@ resource "aws_ecs_service" "atlantis" {
   deployment_minimum_healthy_percent = var.ecs_service_deployment_minimum_healthy_percent
 
   network_configuration {
-    subnets          = local.private_subnet_ids
+    subnets          = var.private_subnet_ids
     security_groups  = [module.atlantis_sg.this_security_group_id]
     assign_public_ip = var.ecs_service_assign_public_ip
   }
@@ -621,6 +499,7 @@ resource "aws_ecs_service" "atlantis" {
 ###################
 # Cloudwatch logs
 ###################
+
 resource "aws_cloudwatch_log_group" "atlantis" {
   name              = var.name
   retention_in_days = var.cloudwatch_log_retention_in_days
